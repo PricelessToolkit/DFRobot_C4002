@@ -76,6 +76,16 @@ void setup() {
     Serial.print("Range setup failed. Response code: ");
     Serial.println(radar.lastResponse());
   }
+
+  if (!radar.setSensitivityPreset(DFRobot_C4002::MOVING_TARGET_GATES, DFRobot_C4002::HIGH_SENSITIVITY)) {
+    Serial.print("Moving sensitivity setup failed. Response code: ");
+    Serial.println(radar.lastResponse());
+  }
+
+  if (!radar.setSensitivityPreset(DFRobot_C4002::STATIONARY_TARGET_GATES, DFRobot_C4002::HIGH_SENSITIVITY)) {
+    Serial.print("Stationary sensitivity setup failed. Response code: ");
+    Serial.println(radar.lastResponse());
+  }
 }
 
 void loop() {

@@ -11,15 +11,19 @@ const uint8_t FRAME_TYPE_NOTIFICATION = 0x04;
 
 const uint8_t CMD_RESTART = 0x00;
 const uint8_t CMD_FACTORY_RESET_USER = 0x02;
+const uint8_t CMD_SET_BAUD_RATE = 0x21;
 const uint8_t CMD_ENVIRONMENT_CALIBRATION = 0x60;
 const uint8_t CMD_SET_DISTANCE_GATE = 0x62;
+const uint8_t CMD_SET_DISTANCE_GATE_THRESHOLDS = 0x63;
 const uint8_t CMD_SET_OUTPUT_MODE = 0xA0;
 const uint8_t CMD_SET_LED_MODE = 0xA1;
 const uint8_t CMD_SET_RESOLUTION_MODE = 0x66;
 const uint8_t CMD_FACTORY_RESET = 0x80;
+const uint8_t CMD_GET_VERSION = 0x82;
 const uint8_t CMD_SET_REPORT_PERIOD = 0x83;
 const uint8_t CMD_TARGET_DISAPPEAR_DELAY = 0x84;
 const uint8_t CMD_SET_DETECTION_RANGE = 0x86;
+const uint8_t CMD_SET_SENSITIVITY_PRESET = 0x87;
 const uint8_t CMD_SET_LIGHT_THRESHOLD = 0x88;
 
 const uint8_t NOTE_PRESENCE_RESULT = 0x60;
@@ -27,6 +31,16 @@ const uint8_t NOTE_ENVIRONMENT_CALIBRATION = 0x03;
 }
 
 DFRobot_C4002::DFRobot_C4002(Stream &serial) : serial_(&serial) {}
+
+bool DFRobot_C4002::begin(uint8_t outputPin, ResolutionMode mode, uint8_t reportPeriod) {
+  outputPin_ = outputPin;
+  if (outputPin_ != 255) {
+    pinMode(outputPin_, INPUT);
+    digitalWrite(outputPin_, HIGH);
+  }
+
+  return begin(mode, reportPeriod);
+}
 
 bool DFRobot_C4002::begin(ResolutionMode mode, uint8_t reportPeriod) {
   resolutionMode_ = mode;
@@ -44,6 +58,7 @@ bool DFRobot_C4002::begin(ResolutionMode mode, uint8_t reportPeriod) {
     return false;
   }
 
+  getOutputMode(outputMode_);
   return setReportPeriod(reportPeriod);
 }
 
@@ -70,6 +85,32 @@ bool DFRobot_C4002::setReportPeriod(uint8_t period) {
   uint8_t payload[5] = {CMD_SET_REPORT_PERIOD, READ_AND_WRITE_REQ, 5, 0, period};
   Packet reply;
   return command(CMD_SET_REPORT_PERIOD, FRAME_TYPE_WRITE_REQUEST, payload, sizeof(payload), reply);
+}
+
+bool DFRobot_C4002::setSerialBaudRate(BaudRate baudRate) {
+  uint8_t payload[8] = {CMD_SET_BAUD_RATE, READ_AND_WRITE_REQ, 8, 0};
+  uint32_t value = static_cast<uint32_t>(baudRate);
+  payload[4] = value & 0xFF;
+  payload[5] = (value >> 8) & 0xFF;
+  payload[6] = (value >> 16) & 0xFF;
+  payload[7] = (value >> 24) & 0xFF;
+
+  Packet reply;
+  return command(CMD_SET_BAUD_RATE, FRAME_TYPE_WRITE_REQUEST, payload, sizeof(payload), reply);
+}
+
+bool DFRobot_C4002::getVersionInfo(VersionType type, String &version) {
+  uint8_t payload[5] = {CMD_GET_VERSION, READ_AND_WRITE_REQ, 5, 0, static_cast<uint8_t>(type)};
+  Packet reply;
+  if (!command(CMD_GET_VERSION, FRAME_TYPE_READ_REQUEST, payload, sizeof(payload), reply)) {
+    return false;
+  }
+
+  version = "";
+  for (uint16_t i = 0; i < reply.dataLen; i++) {
+    version += static_cast<char>(reply.data[i]);
+  }
+  return true;
 }
 
 bool DFRobot_C4002::setResolutionMode(ResolutionMode mode) {
@@ -119,15 +160,27 @@ bool DFRobot_C4002::setDetectionRangeMeters(float closestMeters, float farthestM
                              static_cast<uint16_t>(farthestMeters * 100.0f));
 }
 
-bool DFRobot_C4002::getDetectionRangeMeters(float &closestMeters, float &farthestMeters) {
+bool DFRobot_C4002::getDetectionRangeCm(uint16_t &closestCm, uint16_t &farthestCm) {
   uint8_t payload[4] = {CMD_SET_DETECTION_RANGE, READ_AND_WRITE_REQ, 4, 0};
   Packet reply;
   if (!command(CMD_SET_DETECTION_RANGE, FRAME_TYPE_READ_REQUEST, payload, sizeof(payload), reply) || reply.dataLen < 4) {
     return false;
   }
 
-  closestMeters = readU16LE(&reply.data[0]) * 0.01f;
-  farthestMeters = readU16LE(&reply.data[2]) * 0.01f;
+  closestCm = readU16LE(&reply.data[0]);
+  farthestCm = readU16LE(&reply.data[2]);
+  return true;
+}
+
+bool DFRobot_C4002::getDetectionRangeMeters(float &closestMeters, float &farthestMeters) {
+  uint16_t closestCm = 0;
+  uint16_t farthestCm = 0;
+  if (!getDetectionRangeCm(closestCm, farthestCm)) {
+    return false;
+  }
+
+  closestMeters = closestCm * 0.01f;
+  farthestMeters = farthestCm * 0.01f;
   return true;
 }
 
@@ -209,6 +262,36 @@ bool DFRobot_C4002::setOutputLed(bool enabled) {
   return command(CMD_SET_LED_MODE, FRAME_TYPE_WRITE_REQUEST, payload, sizeof(payload), reply);
 }
 
+bool DFRobot_C4002::getLedStatus(LedStatus &status) {
+  uint8_t payload[4] = {CMD_SET_LED_MODE, READ_AND_WRITE_REQ, 4, 0};
+  Packet reply;
+  if (!command(CMD_SET_LED_MODE, FRAME_TYPE_READ_REQUEST, payload, sizeof(payload), reply) || reply.dataLen < 2) {
+    return false;
+  }
+
+  status.runLed = static_cast<LedMode>(reply.data[0]);
+  status.outputLed = static_cast<LedMode>(reply.data[1]);
+  return true;
+}
+
+DFRobot_C4002::TargetState DFRobot_C4002::outputPinTargetState() const {
+  if (outputPin_ == 255) {
+    return TARGET_ERROR;
+  }
+
+  bool active = digitalRead(outputPin_) == HIGH;
+  if (outputMode_ == OUTPUT_ON_MOTION) {
+    return active ? MOVING_TARGET : STATIONARY_TARGET_OR_NO_TARGET;
+  }
+  if (outputMode_ == OUTPUT_ON_PRESENCE) {
+    return active ? STATIONARY_TARGET : MOVING_TARGET_OR_NO_TARGET;
+  }
+  if (outputMode_ == OUTPUT_ON_MOTION_OR_PRESENCE) {
+    return active ? MOVING_OR_STATIONARY_TARGET : NO_TARGET;
+  }
+  return TARGET_ERROR;
+}
+
 bool DFRobot_C4002::enableDistanceGates(DistanceGateType type, const uint8_t *gateMask, uint8_t gates) {
   if (gateMask == nullptr || gates == 0 || gates > MAX_GATE_COUNT) {
     lastResponse_ = PARAMS_ERR;
@@ -238,8 +321,83 @@ bool DFRobot_C4002::enableAllDistanceGates(bool enabled) {
   return enableDistanceGates(STATIONARY_TARGET_GATES, gates, count);
 }
 
+bool DFRobot_C4002::setDistanceGateThresholds(DistanceGateType type, const uint8_t *thresholds,
+                                              uint8_t thresholdCount) {
+  uint8_t count = gateCount();
+  if (thresholds == nullptr || thresholdCount < count || count > MAX_GATE_COUNT) {
+    lastResponse_ = PARAMS_ERR;
+    return false;
+  }
+
+  uint8_t payload[7 + MAX_GATE_COUNT] = {};
+  uint16_t payloadLen = 7 + count;
+  payload[0] = CMD_SET_DISTANCE_GATE_THRESHOLDS;
+  payload[1] = READ_AND_WRITE_REQ;
+  writeU16LE(&payload[2], payloadLen);
+  payload[4] = static_cast<uint8_t>(type);
+  payload[5] = CUSTOM_SENSITIVITY;
+  payload[6] = 0x01;
+  memcpy(&payload[7], thresholds, count);
+
+  Packet reply;
+  return command(CMD_SET_DISTANCE_GATE_THRESHOLDS, FRAME_TYPE_WRITE_REQUEST, payload, payloadLen, reply);
+}
+
+bool DFRobot_C4002::getDistanceGateThresholds(DistanceGateType type, uint8_t *thresholds,
+                                              uint8_t thresholdCount) {
+  uint8_t count = gateCount();
+  if (thresholds == nullptr || thresholdCount < count || count > MAX_GATE_COUNT) {
+    lastResponse_ = PARAMS_ERR;
+    return false;
+  }
+
+  uint8_t payload[7] = {CMD_SET_DISTANCE_GATE_THRESHOLDS, READ_AND_WRITE_REQ, 7, 0,
+                        static_cast<uint8_t>(type), static_cast<uint8_t>(CURRENT_SENSITIVITY), 0x00};
+  Packet reply;
+  if (!command(CMD_SET_DISTANCE_GATE_THRESHOLDS, FRAME_TYPE_READ_REQUEST, payload, sizeof(payload), reply) ||
+      reply.dataLen < static_cast<uint16_t>(3 + count)) {
+    return false;
+  }
+
+  memcpy(thresholds, &reply.data[3], count);
+  return true;
+}
+
+bool DFRobot_C4002::setSensitivityPreset(DistanceGateType type, SensitivityPreset preset) {
+  uint8_t payload[6] = {CMD_SET_SENSITIVITY_PRESET, READ_AND_WRITE_REQ, 6, 0,
+                        static_cast<uint8_t>(type), static_cast<uint8_t>(preset)};
+  Packet reply;
+  return command(CMD_SET_SENSITIVITY_PRESET, FRAME_TYPE_WRITE_REQUEST, payload, sizeof(payload), reply);
+}
+
+bool DFRobot_C4002::getSensitivityPreset(DistanceGateType type, SensitivityPreset &preset) {
+  uint8_t payload[6] = {CMD_SET_SENSITIVITY_PRESET, READ_AND_WRITE_REQ, 6, 0, static_cast<uint8_t>(type), 0};
+  Packet reply;
+  if (!command(CMD_SET_SENSITIVITY_PRESET, FRAME_TYPE_READ_REQUEST, payload, sizeof(payload), reply) ||
+      reply.dataLen < 2) {
+    preset = SENSITIVITY_ERROR;
+    return false;
+  }
+
+  preset = static_cast<SensitivityPreset>(reply.data[1]);
+  return true;
+}
+
 uint8_t DFRobot_C4002::gateCount() const {
   return resolutionMode_ == RESOLUTION_20CM ? 25 : 15;
+}
+
+bool DFRobot_C4002::getAllConfig(Configuration &config) {
+  bool ok = true;
+  ok = getLedStatus(config.ledStatus) && ok;
+  ok = getLightThresholdLux(config.lightThresholdLux) && ok;
+  ok = getDetectionRangeCm(config.detectionRange.closestCm, config.detectionRange.farthestCm) && ok;
+  ok = getTargetDisappearDelay(config.targetDisappearDelaySeconds) && ok;
+  ok = getOutputMode(config.outputMode) && ok;
+  ok = getResolutionMode(config.resolutionMode) && ok;
+  ok = getSensitivityPreset(MOVING_TARGET_GATES, config.movingSensitivity) && ok;
+  ok = getSensitivityPreset(STATIONARY_TARGET_GATES, config.stationarySensitivity) && ok;
+  return ok;
 }
 
 bool DFRobot_C4002::startEnvironmentCalibration(uint16_t delaySeconds, uint16_t durationSeconds,

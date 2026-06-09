@@ -14,6 +14,21 @@ class DFRobot_C4002 {
     STATIONARY_TARGET_GATES = 0x01,
   };
 
+  enum VersionType : uint8_t {
+    HARDWARE_VERSION = 0x00,
+    SOFTWARE_VERSION = 0x01,
+  };
+
+  enum BaudRate : uint32_t {
+    BAUD_57600 = 57600,
+    BAUD_115200 = 115200,
+    BAUD_230400 = 230400,
+    BAUD_460800 = 460800,
+    BAUD_500000 = 500000,
+    BAUD_921600 = 921600,
+    BAUD_1000000 = 1000000,
+  };
+
   enum ResponseCode : uint8_t {
     READ_AND_WRITE_REQ = 0x00,
     SUCCEED = 0x01,
@@ -41,6 +56,9 @@ class DFRobot_C4002 {
     NO_TARGET = 0,
     STATIONARY_TARGET = 1,
     MOVING_TARGET = 2,
+    MOVING_OR_STATIONARY_TARGET = 3,
+    MOVING_TARGET_OR_NO_TARGET = 4,
+    STATIONARY_TARGET_OR_NO_TARGET = 5,
     TARGET_ERROR = 255,
   };
 
@@ -54,6 +72,15 @@ class DFRobot_C4002 {
     NO_EVENT = 0,
     PRESENCE_DATA = 1,
     CALIBRATION_DATA = 2,
+  };
+
+  enum SensitivityPreset : uint8_t {
+    LOW_SENSITIVITY = 0x00,
+    MEDIUM_SENSITIVITY = 0x01,
+    HIGH_SENSITIVITY = 0x02,
+    CUSTOM_SENSITIVITY = 0x03,
+    CURRENT_SENSITIVITY = 0xFF,
+    SENSITIVITY_ERROR = 0xFE,
   };
 
   struct MovingTarget {
@@ -77,9 +104,31 @@ class DFRobot_C4002 {
     MovingTarget moving;
   };
 
+  struct DetectionRange {
+    uint16_t closestCm = 0;
+    uint16_t farthestCm = 0;
+  };
+
+  struct LedStatus {
+    LedMode runLed = LED_KEEP;
+    LedMode outputLed = LED_KEEP;
+  };
+
+  struct Configuration {
+    float lightThresholdLux = 0.0f;
+    DetectionRange detectionRange;
+    OutputMode outputMode = OUTPUT_ON_PRESENCE;
+    ResolutionMode resolutionMode = RESOLUTION_80CM;
+    SensitivityPreset movingSensitivity = SENSITIVITY_ERROR;
+    SensitivityPreset stationarySensitivity = SENSITIVITY_ERROR;
+    uint16_t targetDisappearDelaySeconds = 0;
+    LedStatus ledStatus;
+  };
+
   explicit DFRobot_C4002(Stream &serial);
 
   bool begin(ResolutionMode mode = RESOLUTION_80CM, uint8_t reportPeriod = 10);
+  bool begin(uint8_t outputPin, ResolutionMode mode = RESOLUTION_80CM, uint8_t reportPeriod = 10);
   UpdateEvent update(uint32_t timeoutMs = 20);
 
   const PresenceData &data() const { return data_; }
@@ -98,12 +147,15 @@ class DFRobot_C4002 {
   ResponseCode lastResponse() const { return lastResponse_; }
 
   bool setReportPeriod(uint8_t period);
+  bool setSerialBaudRate(BaudRate baudRate);
+  bool getVersionInfo(VersionType type, String &version);
   bool setResolutionMode(ResolutionMode mode);
   bool getResolutionMode(ResolutionMode &mode);
   ResolutionMode resolutionMode() const { return resolutionMode_; }
 
   bool setDetectionRangeCm(uint16_t closestCm, uint16_t farthestCm);
   bool setDetectionRangeMeters(float closestMeters, float farthestMeters);
+  bool getDetectionRangeCm(uint16_t &closestCm, uint16_t &farthestCm);
   bool getDetectionRangeMeters(float &closestMeters, float &farthestMeters);
 
   bool setLightThresholdLux(float thresholdLux);
@@ -113,12 +165,20 @@ class DFRobot_C4002 {
 
   bool setOutputMode(OutputMode mode);
   bool getOutputMode(OutputMode &mode);
+  TargetState outputPinTargetState() const;
   bool setRunLed(bool enabled);
   bool setOutputLed(bool enabled);
+  bool getLedStatus(LedStatus &status);
 
   bool enableDistanceGates(DistanceGateType type, const uint8_t *gateMask, uint8_t gateCount);
   bool enableAllDistanceGates(bool enabled = true);
+  bool setDistanceGateThresholds(DistanceGateType type, const uint8_t *thresholds, uint8_t thresholdCount);
+  bool getDistanceGateThresholds(DistanceGateType type, uint8_t *thresholds, uint8_t thresholdCount);
+  bool setSensitivityPreset(DistanceGateType type, SensitivityPreset preset);
+  bool getSensitivityPreset(DistanceGateType type, SensitivityPreset &preset);
   uint8_t gateCount() const;
+
+  bool getAllConfig(Configuration &config);
 
   bool startEnvironmentCalibration(uint16_t delaySeconds = 3, uint16_t durationSeconds = 15,
                                    bool autoGenerateThresholds = true);
@@ -157,6 +217,7 @@ class DFRobot_C4002 {
   Stream *serial_;
   PresenceData data_;
   uint16_t calibrationCountdownSeconds_ = 0;
+  uint8_t outputPin_ = 255;
   ResolutionMode resolutionMode_ = RESOLUTION_80CM;
   OutputMode outputMode_ = OUTPUT_ON_PRESENCE;
   ResponseCode lastResponse_ = AUTHENTICATION_ERR;

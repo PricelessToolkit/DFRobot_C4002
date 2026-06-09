@@ -11,10 +11,13 @@ This library wraps the C4002 UART protocol in a small Arduino API that works wit
 - Moving target distance, speed, direction, and energy
 - Light level
 - UART configuration commands
+- Firmware/hardware version queries
+- Sensitivity presets and manual distance-gate thresholds
+- Optional OUT pin state reading
 - Detection range setup
 - Report period setup
 - Resolution mode setup
-- Run/output LED control
+- Run/output LED control and status reads
 - Output pin mode control
 - Environment calibration
 - Restart and factory reset
@@ -97,9 +100,10 @@ The constructor accepts any Arduino `Stream`, including `HardwareSerial`, `Softw
 ```cpp
 bool ok = radar.begin();
 bool ok = radar.begin(DFRobot_C4002::RESOLUTION_80CM, 10);
+bool ok = radar.begin(7, DFRobot_C4002::RESOLUTION_80CM, 10); // optional OUT pin
 ```
 
-`reportPeriod` is in 100 ms units. A value of `10` means roughly one report per second.
+`reportPeriod` is in 100 ms units. A value of `10` means roughly one report per second. If you wire the sensor `OUT` pin to a microcontroller input, pass that input pin to `begin()` and read it with `outputPinTargetState()`.
 
 ### Reading Data
 
@@ -147,6 +151,19 @@ radar.setReportPeriod(10);
 radar.setReportPeriod(5);
 ```
 
+#### Version And Baud Rate
+
+```cpp
+String firmware;
+if (radar.getVersionInfo(DFRobot_C4002::SOFTWARE_VERSION, firmware)) {
+  Serial.println(firmware);
+}
+
+// Takes effect after the sensor is restarted. Reopen your serial port at the new speed.
+radar.setSerialBaudRate(DFRobot_C4002::BAUD_115200);
+radar.restart();
+```
+
 #### LEDs
 
 ```cpp
@@ -157,6 +174,12 @@ radar.setRunLed(false);
 // Turn the output LED on or off.
 radar.setOutputLed(true);
 radar.setOutputLed(false);
+
+DFRobot_C4002::LedStatus leds;
+if (radar.getLedStatus(leds)) {
+  Serial.print("Run LED: ");
+  Serial.println(leds.runLed);
+}
 ```
 
 #### Detection Range
@@ -177,6 +200,10 @@ if (radar.getDetectionRangeMeters(nearest, farthest)) {
   Serial.print(farthest);
   Serial.println(" m");
 }
+
+uint16_t nearestCm = 0;
+uint16_t farthestCm = 0;
+radar.getDetectionRangeCm(nearestCm, farthestCm);
 ```
 
 The sensor range is clamped to 1200 cm by the library.
@@ -212,6 +239,8 @@ if (radar.getOutputMode(outputMode)) {
   Serial.print("Output mode: ");
   Serial.println(outputMode);
 }
+
+DFRobot_C4002::TargetState pinState = radar.outputPinTargetState();
 ```
 
 #### Light Threshold
@@ -257,11 +286,43 @@ radar.enableDistanceGates(DFRobot_C4002::STATIONARY_TARGET_GATES, gates, 15);
 
 Use `15` gates in `RESOLUTION_80CM` mode and `25` gates in `RESOLUTION_20CM` mode. You can also call `radar.gateCount()` after setting the resolution.
 
+Sensitivity presets change how easily each distance gate detects a target. Manual thresholds use values from `0` to `99`.
+
+```cpp
+radar.setSensitivityPreset(DFRobot_C4002::MOVING_TARGET_GATES, DFRobot_C4002::HIGH_SENSITIVITY);
+
+DFRobot_C4002::SensitivityPreset preset;
+radar.getSensitivityPreset(DFRobot_C4002::STATIONARY_TARGET_GATES, preset);
+
+uint8_t thresholds[25] = {};
+uint8_t count = radar.gateCount();
+for (uint8_t i = 0; i < count; i++) {
+  thresholds[i] = 50;
+}
+radar.setDistanceGateThresholds(DFRobot_C4002::STATIONARY_TARGET_GATES, thresholds, count);
+radar.getDistanceGateThresholds(DFRobot_C4002::STATIONARY_TARGET_GATES, thresholds, count);
+```
+
+#### All Configuration
+
+```cpp
+DFRobot_C4002::Configuration config;
+if (radar.getAllConfig(config)) {
+  Serial.print("Range cm: ");
+  Serial.print(config.detectionRange.closestCm);
+  Serial.print("-");
+  Serial.println(config.detectionRange.farthestCm);
+}
+```
+
 ### Calibration
 
 ```cpp
 // Wait 3 seconds, then calibrate for 15 seconds.
 radar.startEnvironmentCalibration(3, 15);
+
+// Third argument controls automatic threshold generation.
+radar.startEnvironmentCalibration(3, 15, true);
 ```
 
 Keep calling `update()` during calibration. `CALIBRATION_DATA` events report the countdown.
@@ -300,11 +361,12 @@ if (!radar.setDetectionRangeMeters(0.2, 6.0)) {
 - Distances from live readings are exposed in meters.
 - Detection range setters accept centimeters or meters.
 - `setReportPeriod()` uses the sensor firmware unit: 100 ms per step.
+- `setSerialBaudRate()` changes the sensor speed only; your sketch must reopen its serial port at the new speed after restart.
 - `RESOLUTION_80CM` uses 15 distance gates. `RESOLUTION_20CM` uses 25 gates.
 
 ## Examples
 
 - `BasicPresence`: read and print live presence data.
-- `Configuration`: set common configuration values.
-- `Calibration`: start environment calibration and print countdown updates.
-- `MultiZonePresence`: split presence into six software zones from 1 m to 6 m.
+- `Configuration`: set common configuration values, read versions, adjust sensitivity, set gate thresholds, and print a config snapshot.
+- `Calibration`: print the software version, start environment calibration, and show countdown updates.
+- `MultiZonePresence`: split presence into six software zones from 1 m to 6 m with high sensitivity presets.

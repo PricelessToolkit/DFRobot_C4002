@@ -29,6 +29,12 @@ void setup() {
     return;
   }
 
+  String version;
+  if (radar.getVersionInfo(DFRobot_C4002::SOFTWARE_VERSION, version)) {
+    Serial.print("Software version: ");
+    Serial.println(version);
+  }
+
   Serial.println("Starting environment calibration...");
   if (!radar.startEnvironmentCalibration(3, 15)) {
     Serial.print("Calibration command failed. Response code: ");

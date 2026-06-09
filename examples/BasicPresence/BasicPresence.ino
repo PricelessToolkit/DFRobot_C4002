@@ -21,6 +21,12 @@ const char *targetStateName(DFRobot_C4002::TargetState state) {
       return "stationary";
     case DFRobot_C4002::MOVING_TARGET:
       return "moving";
+    case DFRobot_C4002::MOVING_OR_STATIONARY_TARGET:
+      return "moving-or-stationary";
+    case DFRobot_C4002::MOVING_TARGET_OR_NO_TARGET:
+      return "moving-or-none";
+    case DFRobot_C4002::STATIONARY_TARGET_OR_NO_TARGET:
+      return "stationary-or-none";
     default:
       return "error";
   }
@@ -52,6 +58,13 @@ void setup() {
   if (!radar.begin()) {
     Serial.print("C4002 begin failed. Response code: ");
     Serial.println(radar.lastResponse());
+    return;
+  }
+
+  String version;
+  if (radar.getVersionInfo(DFRobot_C4002::SOFTWARE_VERSION, version)) {
+    Serial.print("Software version: ");
+    Serial.println(version);
   }
 }
 
